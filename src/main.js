@@ -1,3 +1,28 @@
+class Player extends Phaser.Physics.Arcade.Sprite {
+    constructor(scene, x, y, texture) {
+        super(scene, x, y, texture);
+        scene.add.existing(this);
+        scene.physics.add.existing(this);
+
+        this.setBounce(0.2);
+        this.setCollideWorldBounds(true);
+    }
+
+    update(cursors) {
+        if (cursors.left.isDown) {
+            this.setVelocityX(-160);
+        } else if (cursors.right.isDown) {
+            this.setVelocityX(160);
+        } else {
+            this.setVelocityX(0);
+        }
+
+        if (cursors.up.isDown && this.body.touching.down) {
+            this.setVelocityY(-330);
+        }
+    }
+}
+
 const config = {
     type: Phaser.AUTO,
     width: 800,
@@ -43,9 +68,7 @@ function create() {
     platforms.create(50, 250, 'platform').setScale(0.5).refreshBody();
     platforms.create(750, 220, 'platform').setScale(0.5).refreshBody();
 
-    player = this.physics.add.sprite(100, 450, 'player');
-    player.setBounce(0.2);
-    player.setCollideWorldBounds(true);
+    player = new Player(this, 100, 450, 'player');
 
     this.physics.add.collider(player, platforms);
 
@@ -53,15 +76,5 @@ function create() {
 }
 
 function update() {
-    if (cursors.left.isDown) {
-        player.setVelocityX(-160);
-    } else if (cursors.right.isDown) {
-        player.setVelocityX(160);
-    } else {
-        player.setVelocityX(0);
-    }
-
-    if (cursors.up.isDown && player.body.touching.down) {
-        player.setVelocityY(-330);
-    }
+    player.update(cursors);
 }
