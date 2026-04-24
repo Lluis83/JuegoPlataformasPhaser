@@ -1,13 +1,58 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Phaser Platform Game</title>
+    <title>Super Mario Platformer</title>
     <script src="node_modules/phaser/dist/phaser.min.js"></script>
+    <link rel="stylesheet" href="src/styles.css">
 </head>
 <body>
-    <div id="game-container"></div>
+    <div class="stars"></div>
+    <div class="container">
+        <div class="header">
+            <h1>🍄 Super Mario 🍄</h1>
+            <p class="subtitle">⭐ Platformer Adventure ⭐</p>
+        </div>
+        <div class="game-wrapper">
+            <div class="lives-display" id="lives-display">❤️ Vidas: 3</div>
+            <div class="corner-decoration corner-top-left">🏰</div>
+            <div class="corner-decoration corner-top-right">🏰</div>
+            <div class="corner-decoration corner-bottom-left">🏁</div>
+            <div class="corner-decoration corner-bottom-right">🏁</div>
+            <div id="game-container"></div>
+        </div>
+        <div id="victory-overlay" class="victory-overlay">
+            <div class="victory-card">
+                <div class="victory-title">¡Victoria!</div>
+                <div class="victory-message">Has alcanzado la bandera. ¡Nivel completado!</div>
+                <div class="victory-icons">🍄 ⭐ 🌈</div>
+                <button class="victory-button" onclick="location.reload()">Jugar otra vez</button>
+            </div>
+        </div>
+        <div id="game-over-overlay" class="game-over-overlay">
+            <div class="game-over-card">
+                <div class="game-over-title">¡GAME OVER!</div>
+                <div class="game-over-message">Se acabaron tus vidas. ¡Inténtalo de nuevo!</div>
+                <div class="game-over-icons">💀 😵 🎮</div>
+                <button class="victory-button" onclick="location.reload()">Jugar otra vez</button>
+            </div>
+        </div>
+        <div class="footer">
+            <p>⬅️➡️ Flechas para movimiento | ⬆️ Para saltar</p>
+        </div>
+    </div>
     <script src="src/main.js"></script>
+    <script>
+        const starsContainer = document.querySelector('.stars');
+        for (let i = 0; i < 50; i++) {
+            const star = document.createElement('div');
+            star.className = 'star';
+            star.style.left = Math.random() * 100 + '%';
+            star.style.top = Math.random() * 100 + '%';
+            star.style.animationDelay = Math.random() * 3 + 's';
+            starsContainer.appendChild(star);
+        }
+    </script>
 </body>
 </html>
