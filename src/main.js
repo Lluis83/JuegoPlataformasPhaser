@@ -14,6 +14,12 @@ class Player extends Phaser.Physics.Arcade.Sprite {
         this.setCollideWorldBounds(true); // no puede salir del mundo
         this.setDrag(0.9);              // fricción horizontal al soltar tecla
         this.facingLeft = false;        // dirección actual del personaje
+
+        // Hitbox más pequeña que el sprite (valores en píxeles del texture, antes del scale 2x)
+        // setSize(ancho, alto) → en mundo: 14*2=28 x 26*2=52 px
+        // setOffset(x, y)     → centra horizontalmente y alinea los pies con el borde inferior
+        this.body.setSize(14, 26);
+        this.body.setOffset(9, 3);
     }
 
     // Se llama cada frame desde la función update() principal
@@ -28,13 +34,13 @@ class Player extends Phaser.Physics.Arcade.Sprite {
             this.play('knight_run', true);
         } else {
             this.setVelocityX(0);
-            if (this.body.touching.down) {
+            if (this.body.blocked.down) {
                 this.play('knight_idle', true);   // animación reposo si está en el suelo
             }
         }
 
         // Salto: solo si está tocando el suelo
-        if (cursors.up.isDown && this.body.touching.down) {
+        if (cursors.up.isDown && this.body.blocked.down) {
             this.setVelocityY(-350);
             this.play('knight_roll', true);       // animación voltereta al saltar
         }
@@ -77,11 +83,15 @@ let player;
 let enemy;
 let enemy2;
 let enemy3;
-let platforms;
+let groundLayer;   // capa de colisión del tilemap
 let cursors;       // teclas de dirección
 let goal;          // objeto meta (bandera)
 let goalReached = false;
 let lives = 3;
+let isPaused = false;
+let escKey, pKey;
+let pauseOverlay, pauseTitle, pauseHint;
+let scene;         // referencia a la escena activa
 let audioContext;
 let bgmOscillator;
 let bgmGain;
@@ -223,15 +233,9 @@ function updateLivesDisplay() {
 function preload() {
     const graphics = this.add.graphics();
 
-    // --- Plataformas: textura generada por código (ladrillos marrones) ---
-    graphics.fillStyle(0x8B4513);            // relleno marrón
-    graphics.fillRect(0, 0, 800, 32);
-    graphics.lineStyle(2, 0x654321, 1);
-    for (let i = 0; i < 800; i += 40) {
-        graphics.strokeRect(i, 0, 40, 32);  // líneas de los ladrillos
-    }
-    graphics.generateTexture('platform', 800, 32);
-    graphics.clear();
+    // --- Tilemap exportado desde Tiled ---
+    this.load.tilemapTiledJSON('map', 'assets/level1.json');
+    this.load.image('tileset', 'assets/tileset.png');
 
     // --- Sprite sheet del caballero (knight.png) ---
     // Imagen de 256x256, fotogramas de 32x32 → 8 columnas × 8 filas
@@ -269,11 +273,7 @@ function preload() {
 // CREATE — construcción de la escena al iniciar
 // =============================================================
 function create() {
-    const levelWidth = 2400; // anchura total del nivel (más grande que la pantalla)
-
     this.cameras.main.setBackgroundColor(0x87CEEB); // fondo azul cielo
-    this.physics.world.setBounds(0, 0, levelWidth, 600); // límites del mundo físico
-    this.cameras.main.setBounds(0, 0, levelWidth, 600);  // límites de la cámara
 
     // --- Animaciones del caballero ---
     this.anims.create({ key: 'knight_idle',  frames: this.anims.generateFrameNumbers('knight', { start: 0,  end: 3  }), frameRate: 8,  repeat: -1 }); // reposo (bucle)
@@ -282,46 +282,68 @@ function create() {
     this.anims.create({ key: 'knight_hit',   frames: this.anims.generateFrameNumbers('knight', { start: 48, end: 51 }), frameRate: 8,  repeat: 0  }); // golpe recibido (una vez)
     this.anims.create({ key: 'knight_death', frames: this.anims.generateFrameNumbers('knight', { start: 57, end: 61 }), frameRate: 6,  repeat: 0  }); // muerte (una vez)
 
-    // --- Plataformas estáticas ---
-    platforms = this.physics.add.staticGroup();
-    platforms.create(1200, 568, 'platform').setScale(3).refreshBody();   // suelo principal
-    platforms.create(900,  440, 'platform').setScale(0.5).refreshBody(); // plataforma baja-izquierda
-    platforms.create(1350, 320, 'platform').setScale(0.5).refreshBody(); // plataforma central
-    platforms.create(1800, 260, 'platform').setScale(0.5).refreshBody(); // plataforma alta
-    platforms.create(2200, 380, 'platform').setScale(0.5).refreshBody(); // plataforma cerca de la meta
+    // --- Tilemap (diseñado en Tiled, exportado a assets/level1.json) ---
+    const map = this.make.tilemap({ key: 'map' });
+
+    console.log('Capas detectadas:', map.layers.map(l => l.name));
+
+    // 'tileset' debe coincidir con el nombre del tileset en el JSON y con la clave cargada en preload
+    const tiles = map.addTilesetImage('tileset', 'tileset');
+    if (!tiles) {
+        console.error('❌ addTilesetImage falló. Comprueba que el tileset se llama "tileset" en el JSON y que assets/tileset.png existe.');
+    }
+
+    // Capa de decoración opcional (sin colisión)
+    if (map.getLayer('decorations')) {
+        map.createStaticLayer('decorations', tiles, 0, 0);
+    }
+
+    // Capa de suelo con colisión
+    if (!map.getLayer('ground')) {
+        console.error('❌ No existe la capa "ground" en el JSON. Capas disponibles:', map.layers.map(l => l.name));
+    }
+    groundLayer = map.createStaticLayer('ground', tiles, 0, 0);
+    if (groundLayer) {
+        groundLayer.setCollisionByExclusion([-1]);
+    }
+
+    // Ajusta los límites del mundo y la cámara al tamaño real del mapa
+    this.physics.world.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
+    this.cameras.main.setBounds(0, 0, map.widthInPixels, map.heightInPixels);
 
     // --- Jugador ---
     player = new Player(this, 100, 450, 'knight');
     player.setScale(2); // doble tamaño para que se vea bien en pantalla
 
     // --- Meta (bandera al final del nivel) ---
-    goal = this.physics.add.staticSprite(2350, 520, 'goal');
+    // x=1150 → columna 71 del mapa; y=560 → sobre el suelo (top de fila 37 = 592, menos la mitad del sprite escalado 2x)
+    goal = this.physics.add.staticSprite(1150, 560, 'goal');
     goal.setScale(2);
 
     // --- Enemigos ---
-    enemy = this.physics.add.sprite(1600, 340, 'enemy');
+    enemy = this.physics.add.sprite(400, 400, 'enemy');
     enemy.setBounce(0.8);
     enemy.setCollideWorldBounds(true);
-    enemy.setVelocityX(100);   // se mueve hacia la derecha
+    enemy.setVelocityX(60);
     enemy.name = 'goomba';
 
-    enemy2 = this.physics.add.sprite(1100, 380, 'enemy');
+    enemy2 = this.physics.add.sprite(700, 400, 'enemy');
     enemy2.setBounce(0.8);
     enemy2.setCollideWorldBounds(true);
-    enemy2.setVelocityX(-120); // se mueve hacia la izquierda
+    enemy2.setVelocityX(-60);
     enemy2.name = 'goomba';
 
-    enemy3 = this.physics.add.sprite(1950, 200, 'enemy');
+    enemy3 = this.physics.add.sprite(1000, 400, 'enemy');
     enemy3.setBounce(0.8);
     enemy3.setCollideWorldBounds(true);
-    enemy3.setVelocityX(150);
+    enemy3.setVelocityX(60);
     enemy3.name = 'goomba';
 
-    // --- Colisiones con plataformas ---
-    this.physics.add.collider(player, platforms);
-    this.physics.add.collider(enemy,  platforms);
-    this.physics.add.collider(enemy2, platforms);
-    this.physics.add.collider(enemy3, platforms);
+    // --- Colisiones con el tilemap ---
+    this.physics.add.collider(player, groundLayer);
+    this.physics.add.collider(enemy,  groundLayer);
+    this.physics.add.collider(enemy2, groundLayer);
+    this.physics.add.collider(enemy3, groundLayer);
 
     // --- Colisiones jugador con enemigos ---
     this.physics.add.collider(player, enemy,  handleEnemyCollision, null, this);
@@ -342,15 +364,57 @@ function create() {
     }, null, this);
 
     // --- Controles y cámara ---
-    cursors = this.input.keyboard.createCursorKeys(); // teclas de dirección
-    this.cameras.main.startFollow(player, true, 0.08, 0.08); // cámara sigue al jugador con suavizado
+    scene = this;
+    cursors = this.input.keyboard.createCursorKeys();
+    escKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
+    pKey   = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+    this.cameras.main.startFollow(player, true, 0.08, 0.08);
+
+    // --- Menú de pausa (fijo a la cámara, oculto por defecto) ---
+    pauseOverlay = this.add.graphics()
+        .fillStyle(0x000000, 0.65)
+        .fillRect(0, 0, 800, 600)
+        .setScrollFactor(0)
+        .setDepth(20)
+        .setVisible(false);
+
+    pauseTitle = this.add.text(400, 240, 'PAUSA', {
+        fontSize: '72px', fill: '#ffffff',
+        stroke: '#000000', strokeThickness: 6
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(21).setVisible(false);
+
+    pauseHint = this.add.text(400, 340, 'Pulsa ESC o P para continuar', {
+        fontSize: '22px', fill: '#dddddd'
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(21).setVisible(false);
 
     playBackgroundMusic();
+}
+
+// =============================================================
+// PAUSA
+// =============================================================
+function togglePause() {
+    isPaused = !isPaused;
+    pauseOverlay.setVisible(isPaused);
+    pauseTitle.setVisible(isPaused);
+    pauseHint.setVisible(isPaused);
+    if (isPaused) {
+        scene.physics.pause();
+    } else {
+        scene.physics.resume();
+    }
 }
 
 // =============================================================
 // UPDATE — se ejecuta cada frame
 // =============================================================
 function update() {
-    player.update(cursors);
+    // Activar/desactivar pausa con ESC o P (solo si la partida está en curso)
+    if (!goalReached && (Phaser.Input.Keyboard.JustDown(escKey) || Phaser.Input.Keyboard.JustDown(pKey))) {
+        togglePause();
+    }
+
+    if (!isPaused) {
+        player.update(cursors);
+    }
 }
